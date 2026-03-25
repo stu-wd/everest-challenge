@@ -15,7 +15,6 @@ STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
 wt_club_id = 1116538
-ACCESS_TOKEN = "a2c7293c7f200745aec8bcd2d0b5a74017283a4f"
 
 
 def pretty_print(data):
@@ -40,67 +39,64 @@ def get_access_token():
     }
 
     response = requests.post(url, data=payload)
-    response.raise_for_status()  # Raise an exception if the request failed
+    response.raise_for_status()
 
-    global ACCESS_TOKEN
-    ACCESS_TOKEN = response.json().get("access_token")
-    return ACCESS_TOKEN
+    return response.json().get("access_token")
 
 
-def make_strava_request(endpoint: str, method: str = "GET", **args):
+def make_strava_request(endpoint: str, access_token: str, method: str = "GET", **args):
     """
     Generic handler for Strava API requests.
     """
-    if not ACCESS_TOKEN:
-        raise ValueError("ACCESS_TOKEN is not set. Call get_access_token() first.")
+    if not access_token:
+        raise ValueError("access_token is required. Call get_access_token() first.")
 
     base_url = "https://www.strava.com/api/v3"
     url = f"{base_url}/{endpoint.lstrip('/')}"
 
     headers = args.pop("headers", {})
-    headers["Authorization"] = f"Bearer {ACCESS_TOKEN}"
+    headers["Authorization"] = f"Bearer {access_token}"
 
     response = requests.request(method, url, headers=headers, **args)
     response.raise_for_status()
 
-    # Return JSON if there is content, otherwise None (e.g., for 204 No Content)
     if response.status_code == 204:
         return None
     return response.json()
 
 
-def get_athlete_profile():
+def get_athlete_profile(access_token: str):
     """
     Make a basic API call using the access token.
     We'll fetch the authenticated athlete's profile.
     """
-    return make_strava_request("athlete")
+    return make_strava_request("athlete", access_token)
 
 
-def get_club_athletes():
+def get_club_athletes(access_token: str):
     """
     Fetch the athletes of the club.
     """
-    return make_strava_request(f"clubs/{wt_club_id}/members")
+    return make_strava_request(f"clubs/{wt_club_id}/members", access_token)
 
 
-def get_athlete_stats(athlete_id: int):
+def get_athlete_stats(athlete_id: int, access_token: str):
     """
     Fetch the stats of an athlete.
     * NOTE: This endpoint ONLY works for the authenticated athlete.
     If you pass another member's ID, Strava returns a 403 Forbidden.
     """
-    return make_strava_request(f"athletes/{athlete_id}/stats")
+    return make_strava_request(f"athletes/{athlete_id}/stats", access_token)
 
 
-def get_club_activities(club_id: int, per_page: int = 200):
+def get_club_activities(club_id: int, access_token: str, per_page: int = 200):
     """
     Fetch recent activities for the entire club.
     If you want to track stats for club members, you usually have to
     fetch the club's activities and aggregate the stats (distance, time, etc.)
     yourself, because Strava does not allow you to request another user's stats directly.
     """
-    return make_strava_request(f"clubs/{club_id}/activities?per_page={per_page}")
+    return make_strava_request(f"clubs/{club_id}/activities?per_page={per_page}", access_token)
 
 
 def get_registered_athletes():
@@ -363,6 +359,10 @@ def run_sync(publish_date=None):
         print(f"Auto-calculated today's date as: {publish_date}")
 
     try:
+        print("\nFetching fresh Strava access token...")
+        access_token = get_access_token()
+        print("Successfully obtained access token!")
+
         print(f"\nFetching registered athletes from Google Sheet...")
         registered_athletes = get_registered_athletes()
         print(f"Found {len(registered_athletes)} registered athletes.")
@@ -372,7 +372,7 @@ def run_sync(publish_date=None):
         print(f"Found {len(processed_keys)} previously processed activities.")
 
         print(f"\nFetching recent activities for club {wt_club_id}...")
-        activities = get_club_activities(wt_club_id)
+        activities = get_club_activities(wt_club_id, access_token)
         print(f"Retrieved {len(activities)} activities from the club feed!")
 
         if activities:
