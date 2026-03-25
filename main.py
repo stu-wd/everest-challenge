@@ -96,7 +96,9 @@ def get_club_activities(club_id: int, access_token: str, per_page: int = 200):
     fetch the club's activities and aggregate the stats (distance, time, etc.)
     yourself, because Strava does not allow you to request another user's stats directly.
     """
-    return make_strava_request(f"clubs/{club_id}/activities?per_page={per_page}", access_token)
+    return make_strava_request(
+        f"clubs/{club_id}/activities?per_page={per_page}", access_token
+    )
 
 
 def get_registered_athletes():
@@ -106,23 +108,23 @@ def get_registered_athletes():
     """
     try:
         # Authenticate using the service account credential file
-        gc = gspread.service_account(filename='credentials.json')
-        
+        gc = gspread.service_account(filename="credentials.json")
+
         # Open by Spreadsheet ID
         sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
-        
+
         # Select the specific worksheet by its gid
         worksheet = sheet.get_worksheet_by_id(442498855)
-        
+
         # Get all records
         all_values = filter(None, worksheet.get_all_values())
-        
+
         valid_names = []
         # Names begin past the header rows (typically row 5 or index 4)
         for i, row in enumerate(all_values):
-            if i < 3:  # Skip the first ~3-4 header rows 
+            if i < 3:  # Skip the first ~3-4 header rows
                 continue
-            
+
             # Ensure the row actually has at least 2 columns
             if len(row) >= 2:
                 first_name = str(row[0]).strip()
@@ -130,7 +132,7 @@ def get_registered_athletes():
                 if first_name and last_name:
                     # Store as (First, Last Initial) to match Strava's privacy format (e.g., "Stu", "d")
                     valid_names.append((first_name.lower(), last_name[0].lower()))
-        
+
         return valid_names
     except Exception as e:
         print(f"Failed to fetch registered athletes from Google Sheets: {e}")
@@ -142,20 +144,22 @@ def get_processed_activities():
     Fetch the list of already processed Activity IDs from the database (Google Sheet tab).
     """
     try:
-        gc = gspread.service_account(filename='credentials.json')
+        gc = gspread.service_account(filename="credentials.json")
         sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
-        
+
         try:
             worksheet = sheet.worksheet("Processed Activities Log")
         except gspread.exceptions.WorksheetNotFound:
             print("Processed Activities Log not found, creating it...")
-            worksheet = sheet.add_worksheet(title="Processed Activities Log", rows="1000", cols="2")
+            worksheet = sheet.add_worksheet(
+                title="Processed Activities Log", rows="1000", cols="2"
+            )
             worksheet.append_row(["Activity ID (Composite)", "Date Processed"])
             return set()
-            
+
         records = worksheet.col_values(1)
         if len(records) > 1:
-            return set(records[1:]) # Skip the header
+            return set(records[1:])  # Skip the header
         return set()
     except Exception as e:
         print(f"Failed to fetch processed activities log: {e}")
@@ -168,17 +172,19 @@ def record_processed_activities(composite_keys):
     """
     if not composite_keys:
         return
-        
+
     try:
-        gc = gspread.service_account(filename='credentials.json')
+        gc = gspread.service_account(filename="credentials.json")
         sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
         worksheet = sheet.worksheet("Processed Activities Log")
-        
+
         today_str = datetime.now().strftime("%Y-%m-%d")
         new_rows = [[key, today_str] for key in composite_keys]
-        
+
         worksheet.append_rows(new_rows)
-        print(f"Recorded {len(new_rows)} new activities to the Processed Activities Log.")
+        print(
+            f"Recorded {len(new_rows)} new activities to the Processed Activities Log."
+        )
     except Exception as e:
         print(f"Failed to record new processed activities: {e}")
 
@@ -221,33 +227,28 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         name = act.get("name", "")
         distance_m = act.get("distance", 0)
         distance_mi = round(distance_m * 0.000621371, 2)
-        
+
         moving_time_s = act.get("moving_time", 0)
         elapsed_time_s = act.get("elapsed_time", 0)
-        
+
         elevation_gain_m = act.get("total_elevation_gain", 0)
         elevation_gain_ft = round(elevation_gain_m * 3.28084)
-        
+
         sport_type = act.get("sport_type", "")
-        
+
         # Filter check: only include runs and trail runs
         if sport_type.lower() not in ["run", "trailrun"]:
             continue
 
         # Composite ID should keep raw parameters to maintain deduplication consistency
-        composite_key = (
-            f"{firstname}_{lastname}_{name}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
-        )
+        composite_key = f"{firstname}_{lastname}_{name}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
 
         if composite_key in processed_keys:
             continue
 
         athlete_name = f"{firstname} {lastname}".strip()
         if athlete_name not in aggregated_data:
-            aggregated_data[athlete_name] = {
-                "total_vert": 0,
-                "activities": []
-            }
+            aggregated_data[athlete_name] = {"total_vert": 0, "activities": []}
 
         aggregated_data[athlete_name]["activities"].append(
             {
@@ -271,7 +272,7 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
 
     print("\nProcessed activities matching registered athletes (aggregated by runner):")
     pretty_print(aggregated_data)
-    
+
     return aggregated_data
 
 
@@ -282,66 +283,77 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
     """
     print(f"\nPublishing aggregated vert to Google Sheet for date: {publish_date}")
     try:
-        gc = gspread.service_account(filename='credentials.json')
+        gc = gspread.service_account(filename="credentials.json")
         sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
         worksheet = sheet.get_worksheet_by_id(442498855)
-        
+
         # In this specific Google Sheet:
         # Row 4 contains the date headers starting around Column D
         header_row_index = 4
         date_headers = worksheet.row_values(header_row_index)
-        
+
         if publish_date not in date_headers:
-            print(f"Error: Date '{publish_date}' not found in the header row {header_row_index}.")
+            print(
+                f"Error: Date '{publish_date}' not found in the header row {header_row_index}."
+            )
             print(f"Available dates: {date_headers}")
             return
-            
+
         # gspread uses 1-based indexing for rows and columns
-        publish_col_index = date_headers.index(publish_date) + 1 
-        
+        publish_col_index = date_headers.index(publish_date) + 1
+
         # Row 5 and below contain athletes (Names are in Col A and Col B)
         # We will retrieve all strings down column A and B to find the matching row
         first_names = worksheet.col_values(1)
         last_names = worksheet.col_values(2)
-        
+
         # Process updates for each athlete found in our aggregated data
         for athlete_name, data in aggregated_data.items():
-            first, last = athlete_name.split(' ')
+            first, last = athlete_name.split(" ")
             target_row_index = None
-            
-            # Find which row this athlete matches 
+
+            # Find which row this athlete matches
             for i in range(4, len(first_names)):  # skip headers
-                if i < len(last_names): # Verify last_names list goes this deep
+                if i < len(last_names):  # Verify last_names list goes this deep
                     sheet_first = first_names[i].strip()
                     sheet_last = last_names[i].strip()
-                    if sheet_first.lower() == first.lower() and sheet_last[0].lower() == last[0].lower():
-                        target_row_index = i + 1 # gspread is 1-indexed
+                    if (
+                        sheet_first.lower() == first.lower()
+                        and sheet_last[0].lower() == last[0].lower()
+                    ):
+                        target_row_index = i + 1  # gspread is 1-indexed
                         break
-            
+
             if not target_row_index:
-                print(f"Warning: Could not find row for athlete '{athlete_name}' in sheet. Skipping...")
+                print(
+                    f"Warning: Could not find row for athlete '{athlete_name}' in sheet. Skipping..."
+                )
                 continue
-                
-            total_new_vert = data['total_vert']
+
+            total_new_vert = data["total_vert"]
             if total_new_vert == 0:
-                continue # Nothing to publish for this user
-                
+                continue  # Nothing to publish for this user
+
             # Grab current cell value safely
             current_val_str = worksheet.cell(target_row_index, publish_col_index).value
             current_val = 0
-            if current_val_str and str(current_val_str).strip() != '':
+            if current_val_str and str(current_val_str).strip() != "":
                 try:
                     # Strip out commas from big numbers like "1,200"
-                    current_val = int(str(current_val_str).replace(',', '').strip())
+                    current_val = int(str(current_val_str).replace(",", "").strip())
                 except ValueError:
-                    print(f"Warning: Could not parse current vert '{current_val_str}' for {athlete_name}. Assuming 0.")
-                    
+                    print(
+                        f"Warning: Could not parse current vert '{current_val_str}' for {athlete_name}. Assuming 0."
+                    )
+
             updated_vert = current_val + total_new_vert
-            
+
             # Write updated cell value back to Google Sheets!
             worksheet.update_cell(target_row_index, publish_col_index, updated_vert)
-            print(f"--> Published {total_new_vert} new vert for {athlete_name}. Box updated from {current_val} to {updated_vert}.")
-            
+            print(
+                f"--> Published {total_new_vert} new vert for {athlete_name}. Box updated from {current_val} to {updated_vert}."
+            )
+
     except Exception as e:
         print(f"Failed to publish to Google Sheets: {e}")
 
@@ -353,7 +365,7 @@ def run_sync(publish_date=None):
         return
 
     # Auto-calculate today's date in 'M/D' format if requested
-    if publish_date and publish_date.lower() == 'today':
+    if publish_date and publish_date.lower() == "today":
         now = datetime.now()
         publish_date = f"{now.month}/{now.day}"
         print(f"Auto-calculated today's date as: {publish_date}")
@@ -366,7 +378,7 @@ def run_sync(publish_date=None):
         print(f"\nFetching registered athletes from Google Sheet...")
         registered_athletes = get_registered_athletes()
         print(f"Found {len(registered_athletes)} registered athletes.")
-        
+
         print(f"\nFetching processed activities log from Google Sheet...")
         processed_keys = get_processed_activities()
         print(f"Found {len(processed_keys)} previously processed activities.")
@@ -376,20 +388,26 @@ def run_sync(publish_date=None):
         print(f"Retrieved {len(activities)} activities from the club feed!")
 
         if activities:
-            aggregated_data = print_processed_activities(activities, valid_names=registered_athletes, processed_keys=processed_keys)
-            
+            aggregated_data = print_processed_activities(
+                activities,
+                valid_names=registered_athletes,
+                processed_keys=processed_keys,
+            )
+
             if publish_date and aggregated_data:
                 publish_to_google_sheet(aggregated_data, publish_date)
-                
+
                 # Record the newly processed keys to the log
                 new_keys = []
                 for athlete, data in aggregated_data.items():
                     for act in data["activities"]:
                         new_keys.append(act["Activity ID (Composite)"])
                 record_processed_activities(new_keys)
-                
+
             elif aggregated_data:
-                print("\n(Run with --publish_to 'MM/DD' to push these values to the tracking sheet.)")
+                print(
+                    "\n(Run with --publish_to 'MM/DD' to push these values to the tracking sheet.)"
+                )
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -410,7 +428,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--publish_to",
         type=str,
-        help="The date column (e.g., '3/15' or 'today') to publish total vert to. If not provided, data is not published."
+        help="The date column (e.g., '3/15' or 'today') to publish total vert to. If not provided, data is not published.",
     )
     args = parser.parse_args()
 
