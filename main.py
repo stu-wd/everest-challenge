@@ -292,11 +292,13 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
             }
 
         # Calculate per-activity intensity score for the logbook
-        # Formula: ((Gain/100) + (Dist*2)) / (Time_Hours)
+        # Formula: [ (Vert/100) + Distance + (Steepness Bonus: Vert/Dist/25) ] / Time_Hours
         act_hours = moving_time_s / 3600.0
         act_score = 0
         if act_hours > 0:
-            act_score = round(((elevation_gain_ft / 100) + (distance_mi * 2)) / act_hours, 2)
+            # Steepness calculation (max(0.01) to avoid div by zero)
+            steepness_bonus = (elevation_gain_ft / max(distance_mi, 0.01)) / 25.0
+            act_score = round(((elevation_gain_ft / 100.0) + distance_mi + steepness_bonus) / act_hours, 2)
 
         aggregated_data[athlete_name]["activities"].append(
             {
@@ -328,7 +330,9 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         total_hours = data["total_moving_time_s"] / 3600.0
 
         if total_hours > 0:
-            intensity_score = ((total_vert / 100) + (total_dist * 2)) / total_hours
+            # Steepness calculation for the aggregate
+            steepness_bonus = (total_vert / max(total_dist, 0.01)) / 25.0
+            intensity_score = ((total_vert / 100.0) + total_dist + steepness_bonus) / total_hours
             data["intensity_score"] = round(intensity_score, 2)
         else:
             data["intensity_score"] = 0
