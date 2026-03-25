@@ -1,0 +1,9 @@
+venv/
+.venv/
+.env
+__pycache__/
+*.pyc
+*.pyo
+credentials.json
+*.xlsx
+arguments_parser.py
