@@ -427,13 +427,13 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
         return False
 
 
-def run_sync(publish_date=None):
+def run_sync(publish_date="today"):
     if not all([STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET, STRAVA_REFRESH_TOKEN]):
         print("Error: Missing credentials in .env file.")
         print("Please copy .env.template to .env and fill in your Strava credentials.")
         return
 
-    # Auto-calculate today's date in 'M/D' format if requested
+    # Auto-calculate today's date in 'M/D' format if requested or defaulted
     if publish_date and publish_date.lower() == "today":
         now = datetime.now()
         publish_date = f"{now.month}/{now.day}"
@@ -502,7 +502,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--publish_to",
         type=str,
-        help="The date column (e.g., '3/15' or 'today') to publish total vert to. If not provided, data is not published.",
+        default="today",
+        help="The date column (e.g., '3/15' or 'today') to publish total vert to. Defaults to 'today'.",
     )
     args = parser.parse_args()
 
