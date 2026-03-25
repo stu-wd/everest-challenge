@@ -152,7 +152,7 @@ def get_processed_activities():
         except gspread.exceptions.WorksheetNotFound:
             print("Processed Activities Log not found, creating it...")
             worksheet = sheet.add_worksheet(
-                title="Processed Activities Log", rows="1000", cols="8"
+                title="Processed Activities Log", rows="1000", cols="9"
             )
             worksheet.append_row(
                 [
@@ -160,6 +160,7 @@ def get_processed_activities():
                     "Athlete",
                     "Activity Name",
                     "Distance (mi)",
+                    "Moving Time",
                     "Elevation Gain (ft)",
                     "Activity Type",
                     "Intensity Score",
@@ -210,6 +211,7 @@ def record_processed_activities(new_activities):
                     athlete,
                     act["Activity Name"],
                     dist_mi,
+                    act["Moving Time"],
                     gain_ft,
                     act["Sport Type"],
                     act.get("intensity_score", 0),
