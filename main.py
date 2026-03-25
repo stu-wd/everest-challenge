@@ -152,9 +152,18 @@ def get_processed_activities():
         except gspread.exceptions.WorksheetNotFound:
             print("Processed Activities Log not found, creating it...")
             worksheet = sheet.add_worksheet(
-                title="Processed Activities Log", rows="1000", cols="2"
+                title="Processed Activities Log", rows="1000", cols="6"
             )
-            worksheet.append_row(["Activity ID (Composite)", "Date Processed"])
+            worksheet.append_row(
+                [
+                    "Activity ID (Composite)",
+                    "Athlete",
+                    "Activity Name",
+                    "Elevation Gain (ft)",
+                    "Activity Type",
+                    "Date Processed",
+                ]
+            )
             return set()
 
         records = worksheet.col_values(1)
@@ -166,11 +175,11 @@ def get_processed_activities():
         return set()
 
 
-def record_processed_activities(composite_keys):
+def record_processed_activities(new_activities):
     """
-    Append newly processed activity IDs to the log tab to prevent double counting.
+    Append newly processed activity data to the log tab for bookkeeping and deduplication.
     """
-    if not composite_keys:
+    if not new_activities:
         return
 
     try:
@@ -179,7 +188,19 @@ def record_processed_activities(composite_keys):
         worksheet = sheet.worksheet("Processed Activities Log")
 
         today_str = datetime.now().strftime("%Y-%m-%d")
-        new_rows = [[key, today_str] for key in composite_keys]
+        new_rows = []
+        for act in new_activities:
+            athlete = f"{act['First Name']} {act['Last Name']}"
+            new_rows.append(
+                [
+                    act["Activity ID (Composite)"],
+                    athlete,
+                    act["Activity Name"],
+                    act["Elevation Gain (ft)"],
+                    act["Sport Type"],
+                    today_str,
+                ]
+            )
 
         worksheet.append_rows(new_rows)
         print(
@@ -237,11 +258,11 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         sport_type = act.get("sport_type", "")
 
         # Filter check: only include runs and trail runs
-        if sport_type.lower() not in ["run", "trailrun"]:
+        if sport_type.lower() not in ["run", "trailrun", "walk", "hike"]:
             continue
 
         # Composite ID should keep raw parameters to maintain deduplication consistency
-        composite_key = f"{firstname}_{lastname}_{name}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
+        composite_key = f"{firstname}_{lastname}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
 
         if composite_key in processed_keys:
             continue
@@ -297,7 +318,7 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
                 f"Error: Date '{publish_date}' not found in the header row {header_row_index}."
             )
             print(f"Available dates: {date_headers}")
-            return
+            return False
 
         # gspread uses 1-based indexing for rows and columns
         publish_col_index = date_headers.index(publish_date) + 1
@@ -350,12 +371,10 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
 
             # Write updated cell value back to Google Sheets!
             worksheet.update_cell(target_row_index, publish_col_index, updated_vert)
-            print(
-                f"--> Published {total_new_vert} new vert for {athlete_name}. Box updated from {current_val} to {updated_vert}."
-            )
-
+        return True
     except Exception as e:
         print(f"Failed to publish to Google Sheets: {e}")
+        return False
 
 
 def run_sync(publish_date=None):
@@ -395,14 +414,19 @@ def run_sync(publish_date=None):
             )
 
             if publish_date and aggregated_data:
-                publish_to_google_sheet(aggregated_data, publish_date)
+                success = publish_to_google_sheet(aggregated_data, publish_date)
 
-                # Record the newly processed keys to the log
-                new_keys = []
-                for athlete, data in aggregated_data.items():
-                    for act in data["activities"]:
-                        new_keys.append(act["Activity ID (Composite)"])
-                record_processed_activities(new_keys)
+                if success:
+                    # Record the newly processed objects to the detailed log
+                    new_activities = []
+                    for athlete, data in aggregated_data.items():
+                        for act in data["activities"]:
+                            new_activities.append(act)
+                    record_processed_activities(new_activities)
+                else:
+                    print(
+                        "\nSkipping Processed Activities Log update because the publish step failed."
+                    )
 
             elif aggregated_data:
                 print(
