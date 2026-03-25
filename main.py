@@ -269,7 +269,12 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
 
         athlete_name = f"{firstname} {lastname}".strip()
         if athlete_name not in aggregated_data:
-            aggregated_data[athlete_name] = {"total_vert": 0, "activities": []}
+            aggregated_data[athlete_name] = {
+                "total_vert": 0,
+                "total_dist_mi": 0,
+                "total_moving_time_s": 0,
+                "activities": [],
+            }
 
         aggregated_data[athlete_name]["activities"].append(
             {
@@ -286,10 +291,26 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
             }
         )
         aggregated_data[athlete_name]["total_vert"] += elevation_gain_ft
+        aggregated_data[athlete_name]["total_dist_mi"] += distance_mi
+        aggregated_data[athlete_name]["total_moving_time_s"] += moving_time_s
 
     if not aggregated_data:
         print("No activities matched the registered athletes list.")
         return aggregated_data
+
+    # Finalize intensity score calculation for the day
+    for athlete_name, data in aggregated_data.items():
+        total_vert = data["total_vert"]
+        total_dist = data["total_dist_mi"]
+        total_hours = data["total_moving_time_s"] / 3600.0
+
+        if total_hours > 0:
+            intensity_score = ((total_vert / 100) + (total_dist * 2)) / total_hours
+            data["intensity_score"] = round(intensity_score, 2)
+        else:
+            data["intensity_score"] = 0
+        
+        data["total_dist_mi"] = round(data["total_dist_mi"], 2)
 
     print("\nProcessed activities matching registered athletes (aggregated by runner):")
     pretty_print(aggregated_data)
@@ -299,10 +320,10 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
 
 def publish_to_google_sheet(aggregated_data, publish_date: str):
     """
-    Finds the athlete and the column for the publish_date, adds the total_vert to any existing
-    value in that cell, and updates the Google Sheet securely.
+    Finds the athlete and the column for the publish_date, adds the stats to any existing
+    values (Vert, Dist, Score) in that block, and updates the Google Sheet securely.
     """
-    print(f"\nPublishing aggregated vert to Google Sheet for date: {publish_date}")
+    print(f"\nPublishing aggregated stats to Google Sheet for date: {publish_date}")
     try:
         gc = gspread.service_account(filename="credentials.json")
         sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
@@ -351,26 +372,44 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
                 )
                 continue
 
-            total_new_vert = data["total_vert"]
-            if total_new_vert == 0:
-                continue  # Nothing to publish for this user
+            # Stats to publish
+            new_vert = data["total_vert"]
+            new_dist = data["total_dist_mi"]
+            new_score = data["intensity_score"]
 
-            # Grab current cell value safely
-            current_val_str = worksheet.cell(target_row_index, publish_col_index).value
-            current_val = 0
-            if current_val_str and str(current_val_str).strip() != "":
-                try:
-                    # Strip out commas from big numbers like "1,200"
-                    current_val = int(str(current_val_str).replace(",", "").strip())
-                except ValueError:
-                    print(
-                        f"Warning: Could not parse current vert '{current_val_str}' for {athlete_name}. Assuming 0."
-                    )
+            if new_vert == 0 and new_dist == 0:
+                continue
 
-            updated_vert = current_val + total_new_vert
+            # Helper to safely parse existing numeric values
+            def get_existing_val(col_offset):
+                val_str = worksheet.cell(target_row_index, publish_col_index + col_offset).value
+                if val_str and str(val_str).strip() != "":
+                    try:
+                        return float(str(val_str).replace(",", "").strip())
+                    except ValueError:
+                        print(f"Warning: Could not parse existing value '{val_str}' at offset {col_offset}")
+                return 0.0
 
-            # Write updated cell value back to Google Sheets!
+            # Get current values for Vert, Dist, Intensity
+            curr_vert = int(get_existing_val(0))
+            curr_dist = get_existing_val(1)
+            curr_score = get_existing_val(2)
+
+            # Update cell values (summing current with new)
+            updated_vert = curr_vert + new_vert
+            updated_dist = round(curr_dist + new_dist, 2)
+            updated_score = round(curr_score + new_score, 2)
+
+            # Bulk update cells for Vert (Col), Dist (Col+1), Intensity (Col+2)
+            # Using update_cells or multiple update_cell if simpler
             worksheet.update_cell(target_row_index, publish_col_index, updated_vert)
+            worksheet.update_cell(target_row_index, publish_col_index + 1, updated_dist)
+            worksheet.update_cell(target_row_index, publish_col_index + 2, updated_score)
+
+            print(
+                f"--> Updated {athlete_name}: Vert +{new_vert} (={updated_vert}), "
+                f"Dist +{new_dist} (={updated_dist}), Score +{new_score} (={updated_score})"
+            )
         return True
     except Exception as e:
         print(f"Failed to publish to Google Sheets: {e}")
