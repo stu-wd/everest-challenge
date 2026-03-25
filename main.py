@@ -152,15 +152,17 @@ def get_processed_activities():
         except gspread.exceptions.WorksheetNotFound:
             print("Processed Activities Log not found, creating it...")
             worksheet = sheet.add_worksheet(
-                title="Processed Activities Log", rows="1000", cols="6"
+                title="Processed Activities Log", rows="1000", cols="8"
             )
             worksheet.append_row(
                 [
                     "Activity ID (Composite)",
                     "Athlete",
                     "Activity Name",
+                    "Distance (mi)",
                     "Elevation Gain (ft)",
                     "Activity Type",
+                    "Intensity Score",
                     "Date Processed",
                 ]
             )
@@ -191,13 +193,26 @@ def record_processed_activities(new_activities):
         new_rows = []
         for act in new_activities:
             athlete = f"{act['First Name']} {act['Last Name']}"
+            
+            # Distance in miles and Time in hours for per-activity score
+            dist_mi = act.get("Distance (mi)", 0)
+            gain_ft = act.get("Elevation Gain (ft)", 0)
+            
+            # Need raw moving time for score. We can parse it back or pass it through.
+            # Easiest is to use the raw stats we aggregated.
+            # We'll calculate a simple score here for the logbook.
+            # For the logbook, we'll try to find the intensity score if it was pre-calculated
+            # Or just use the activity's individual stats.
+            
             new_rows.append(
                 [
                     act["Activity ID (Composite)"],
                     athlete,
                     act["Activity Name"],
-                    act["Elevation Gain (ft)"],
+                    dist_mi,
+                    gain_ft,
                     act["Sport Type"],
+                    act.get("intensity_score", 0),
                     today_str,
                 ]
             )
@@ -276,6 +291,13 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
                 "activities": [],
             }
 
+        # Calculate per-activity intensity score for the logbook
+        # Formula: ((Gain/100) + (Dist*2)) / (Time_Hours)
+        act_hours = moving_time_s / 3600.0
+        act_score = 0
+        if act_hours > 0:
+            act_score = round(((elevation_gain_ft / 100) + (distance_mi * 2)) / act_hours, 2)
+
         aggregated_data[athlete_name]["activities"].append(
             {
                 "Activity ID (Composite)": composite_key,
@@ -288,6 +310,7 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
                 "Elapsed Time": format_time(elapsed_time_s),
                 "Elevation Gain (ft)": elevation_gain_ft,
                 "Sport Type": sport_type,
+                "intensity_score": act_score,
             }
         )
         aggregated_data[athlete_name]["total_vert"] += elevation_gain_ft
@@ -372,43 +395,31 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
                 )
                 continue
 
-            # Stats to publish
+            # Stats to publish (Main sheet ONLY gets Vertical)
             new_vert = data["total_vert"]
-            new_dist = data["total_dist_mi"]
-            new_score = data["intensity_score"]
 
-            if new_vert == 0 and new_dist == 0:
+            if new_vert == 0:
                 continue
 
-            # Helper to safely parse existing numeric values
-            def get_existing_val(col_offset):
-                val_str = worksheet.cell(target_row_index, publish_col_index + col_offset).value
-                if val_str and str(val_str).strip() != "":
-                    try:
-                        return float(str(val_str).replace(",", "").strip())
-                    except ValueError:
-                        print(f"Warning: Could not parse existing value '{val_str}' at offset {col_offset}")
-                return 0.0
+            # Grab current cell value safely
+            current_val_str = worksheet.cell(target_row_index, publish_col_index).value
+            current_val = 0
+            if current_val_str and str(current_val_str).strip() != "":
+                try:
+                    # Strip out commas from big numbers like "1,200"
+                    current_val = int(str(current_val_str).replace(",", "").strip())
+                except ValueError:
+                    print(
+                        f"Warning: Could not parse current vert '{current_val_str}' for {athlete_name}. Assuming 0."
+                    )
 
-            # Get current values for Vert, Dist, Intensity
-            curr_vert = int(get_existing_val(0))
-            curr_dist = get_existing_val(1)
-            curr_score = get_existing_val(2)
+            updated_vert = current_val + new_vert
 
-            # Update cell values (summing current with new)
-            updated_vert = curr_vert + new_vert
-            updated_dist = round(curr_dist + new_dist, 2)
-            updated_score = round(curr_score + new_score, 2)
-
-            # Bulk update cells for Vert (Col), Dist (Col+1), Intensity (Col+2)
-            # Using update_cells or multiple update_cell if simpler
+            # Write updated cell value back to Google Sheets!
             worksheet.update_cell(target_row_index, publish_col_index, updated_vert)
-            worksheet.update_cell(target_row_index, publish_col_index + 1, updated_dist)
-            worksheet.update_cell(target_row_index, publish_col_index + 2, updated_score)
-
+            
             print(
-                f"--> Updated {athlete_name}: Vert +{new_vert} (={updated_vert}), "
-                f"Dist +{new_dist} (={updated_dist}), Score +{new_score} (={updated_score})"
+                f"--> Updated {athlete_name}: Vert +{new_vert} (={updated_vert})"
             )
         return True
     except Exception as e:
