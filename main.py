@@ -4,7 +4,7 @@ import requests
 import gspread
 import argparse
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -450,9 +450,11 @@ def run_sync(publish_date="today"):
 
     # Auto-calculate today's date in 'M/D' format if requested or defaulted
     if publish_date and publish_date.lower() == "today":
-        now = datetime.now()
-        publish_date = f"{now.month}/{now.day}"
-        print(f"Auto-calculated today's date as: {publish_date}")
+        # Buffer logic: If it's before 4 AM early morning, we still mean 'Yesterday'
+        # This keeps the automation robust to midnight crossings.
+        effective_now = datetime.now() - timedelta(hours=4)
+        publish_date = f"{effective_now.month}/{effective_now.day}"
+        print(f"Auto-calculated effective date as: {publish_date}")
 
     try:
         print("\nFetching fresh Strava access token...")
