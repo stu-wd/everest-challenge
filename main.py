@@ -14,7 +14,18 @@ STRAVA_CLIENT_ID = os.getenv("STRAVA_CLIENT_ID")
 STRAVA_CLIENT_SECRET = os.getenv("STRAVA_CLIENT_SECRET")
 STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
-wt_club_id = 1116538
+# --- PRODUCTION CONFIGURATION ---
+# UPDATE THESE FOR THE APRIL 1ST CHALLENGE
+PRODUCTION_SHEET_ID = "1MdiWi1O2IqEcnHbTWdlqzdINnnxOEtCqBrofW6FxDvQ" 
+PRODUCTION_WORKSHEET_GID = 162489933
+WT_CLUB_ID = 1116538
+
+# CHECKPOINT: Set this to the Composite ID of the LAST March 31st activity 
+# to prevent any March vert from counting toward April.
+# Example: "First_Last_8305.2_1740_1832"
+# Set to None to process all available recent activities.
+SYNC_CHECKPOINT_KEY = None
+# -------------------------------
 
 
 def pretty_print(data):
@@ -77,7 +88,8 @@ def get_club_athletes(access_token: str):
     """
     Fetch the athletes of the club.
     """
-    return make_strava_request(f"clubs/{wt_club_id}/members", access_token)
+    return make_strava_request(
+        f"clubs/{WT_CLUB_ID}/members", access_token)
 
 
 def get_athlete_stats(athlete_id: int, access_token: str):
@@ -111,10 +123,10 @@ def get_registered_athletes():
         gc = gspread.service_account(filename="credentials.json")
 
         # Open by Spreadsheet ID
-        sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
+        sheet = gc.open_by_key(PRODUCTION_SHEET_ID)
 
         # Select the specific worksheet by its gid
-        worksheet = sheet.get_worksheet_by_id(442498855)
+        worksheet = sheet.get_worksheet_by_id(PRODUCTION_WORKSHEET_GID)
 
         # Get all records
         all_values = filter(None, worksheet.get_all_values())
@@ -145,7 +157,7 @@ def get_processed_activities():
     """
     try:
         gc = gspread.service_account(filename="credentials.json")
-        sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
+        sheet = gc.open_by_key(PRODUCTION_SHEET_ID)
 
         try:
             worksheet = sheet.worksheet("Processed Activities Log")
@@ -187,7 +199,7 @@ def record_processed_activities(new_activities):
 
     try:
         gc = gspread.service_account(filename="credentials.json")
-        sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
+        sheet = gc.open_by_key(PRODUCTION_SHEET_ID)
         worksheet = sheet.worksheet("Processed Activities Log")
 
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -281,6 +293,11 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         # Composite ID should keep raw parameters to maintain deduplication consistency
         composite_key = f"{firstname}_{lastname}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
 
+        # Production Checkpoint: Stop processing if we hit the manually-specified 'last activity' of March
+        if SYNC_CHECKPOINT_KEY and composite_key == SYNC_CHECKPOINT_KEY:
+            print(f"\nHit production checkpoint: '{SYNC_CHECKPOINT_KEY}' - stopping further processing.")
+            break
+
         if composite_key in processed_keys:
             continue
 
@@ -364,8 +381,8 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
     print(f"\nPublishing aggregated stats to Google Sheet for date: {publish_date}")
     try:
         gc = gspread.service_account(filename="credentials.json")
-        sheet = gc.open_by_key("16icci0k2FnK3UIEcfDcDABhjhRW7O9hySrqZoX6hJS0")
-        worksheet = sheet.get_worksheet_by_id(442498855)
+        sheet = gc.open_by_key(PRODUCTION_SHEET_ID)
+        worksheet = sheet.get_worksheet_by_id(PRODUCTION_WORKSHEET_GID)
 
         # In this specific Google Sheet:
         # Row 4 contains the date headers starting around Column D
@@ -469,8 +486,8 @@ def run_sync(publish_date="today"):
         processed_keys = get_processed_activities()
         print(f"Found {len(processed_keys)} previously processed activities.")
 
-        print(f"\nFetching recent activities for club {wt_club_id}...")
-        activities = get_club_activities(wt_club_id, access_token)
+        print(f"\nFetching recent activities for club {WT_CLUB_ID}...")
+        activities = get_club_activities(WT_CLUB_ID, access_token)
         print(f"Retrieved {len(activities)} activities from the club feed!")
 
         if activities:
