@@ -16,11 +16,11 @@ STRAVA_REFRESH_TOKEN = os.getenv("STRAVA_REFRESH_TOKEN")
 
 # --- PRODUCTION CONFIGURATION ---
 # UPDATE THESE FOR THE APRIL 1ST CHALLENGE
-PRODUCTION_SHEET_ID = "1MdiWi1O2IqEcnHbTWdlqzdINnnxOEtCqBrofW6FxDvQ" 
+PRODUCTION_SHEET_ID = "1MdiWi1O2IqEcnHbTWdlqzdINnnxOEtCqBrofW6FxDvQ"
 PRODUCTION_WORKSHEET_GID = 162489933
 WT_CLUB_ID = 1116538
 
-# CHECKPOINT: Set this to the Composite ID of the LAST March 31st activity 
+# CHECKPOINT: Set this to the Composite ID of the LAST March 31st activity
 # to prevent any March vert from counting toward April.
 # Example: "First_Last_8305.2_1740_1832"
 # Set to None to process all available recent activities.
@@ -84,12 +84,18 @@ def get_athlete_profile(access_token: str):
     return make_strava_request("athlete", access_token)
 
 
+def get_club(access_token: str):
+    """
+    Fetch the club.
+    """
+    return make_strava_request(f"clubs/{WT_CLUB_ID}", access_token)
+
+
 def get_club_athletes(access_token: str):
     """
     Fetch the athletes of the club.
     """
-    return make_strava_request(
-        f"clubs/{WT_CLUB_ID}/members", access_token)
+    return make_strava_request(f"clubs/{WT_CLUB_ID}/members", access_token)
 
 
 def get_athlete_stats(athlete_id: int, access_token: str):
@@ -143,7 +149,13 @@ def get_registered_athletes():
                 last_name = str(row[1]).strip()
                 if first_name and last_name:
                     # Store as (First, Last Initial) to match Strava's privacy format (e.g., "Stu", "d")
-                    valid_names.append((first_name.lower(), last_name[0].lower()))
+                    # We strip() here to avoid issues with weird formatting in the sheet
+                    valid_names.append(
+                        (
+                            first_name.lower().strip(),
+                            last_name.strip()[0].lower() if last_name.strip() else "",
+                        )
+                    )
 
         return valid_names
     except Exception as e:
@@ -206,17 +218,17 @@ def record_processed_activities(new_activities):
         new_rows = []
         for act in new_activities:
             athlete = f"{act['First Name']} {act['Last Name']}"
-            
+
             # Distance in miles and Time in hours for per-activity score
             dist_mi = act.get("Distance (mi)", 0)
             gain_ft = act.get("Elevation Gain (ft)", 0)
-            
+
             # Need raw moving time for score. We can parse it back or pass it through.
             # Easiest is to use the raw stats we aggregated.
             # We'll calculate a simple score here for the logbook.
             # For the logbook, we'll try to find the intensity score if it was pre-calculated
             # Or just use the activity's individual stats.
-            
+
             new_rows.append(
                 [
                     act["Activity ID (Composite)"],
@@ -270,8 +282,18 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         # Filter check: does this athlete exist in our registered spreadsheet?
         if valid_names is not None:
             # Strava returns lastname as "D." or "Darsey", so we just check the first letter safely
-            last_initial = lastname[0].lower() if lastname else ""
-            if (firstname.lower(), last_initial) not in valid_names:
+            # We strip() the names to handle weird formatting in the feed (like "SKT .")
+            clean_first = firstname.split(" ")[0].lower().strip()
+            stripped_last = lastname.strip()
+            last_initial = stripped_last[0].lower() if stripped_last else ""
+
+            # If lastname is empty, try to get it from the end of the firstname (e.g. "Jonathan C.")
+            if not last_initial and " " in firstname:
+                parts = firstname.strip().split(" ")
+                if len(parts) > 1:
+                    last_initial = parts[-1][0].lower()
+
+            if (clean_first, last_initial) not in valid_names:
                 continue
 
         name = act.get("name", "")
@@ -284,18 +306,23 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         elevation_gain_m = act.get("total_elevation_gain", 0)
         elevation_gain_ft = round(elevation_gain_m * 3.28084)
 
-        sport_type = act.get("sport_type", "")
+        # Strava API uses both 'type' and 'sport_type'; check both for safety
+        sport_type = act.get("sport_type") or act.get("type", "")
 
-        # Filter check: only include runs and trail runs
+        # Filter check: include runs, walks, hikes
         if sport_type.lower() not in ["run", "trailrun", "walk", "hike"]:
             continue
 
         # Composite ID should keep raw parameters to maintain deduplication consistency
-        composite_key = f"{firstname}_{lastname}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
+        composite_key = (
+            f"{firstname}_{lastname}_{distance_m}_{moving_time_s}_{elapsed_time_s}"
+        )
 
         # Production Checkpoint: Stop processing if we hit the manually-specified 'last activity' of March
         if SYNC_CHECKPOINT_KEY and composite_key == SYNC_CHECKPOINT_KEY:
-            print(f"\nHit production checkpoint: '{SYNC_CHECKPOINT_KEY}' - stopping further processing.")
+            print(
+                f"\nHit production checkpoint: '{SYNC_CHECKPOINT_KEY}' - stopping further processing."
+            )
             break
 
         if composite_key in processed_keys:
@@ -318,7 +345,7 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
         if act_hours > 0:
             vam = elevation_gain_ft / act_hours
             steepness = elevation_gain_ft / max(distance_mi, 0.01)
-            
+
             volume_pts = (elevation_gain_ft / 100.0) + (distance_mi * 2.0)
             rate_pts = (vam / 100.0) + (steepness / 25.0)
             act_score = round(volume_pts + rate_pts, 2)
@@ -356,15 +383,15 @@ def print_processed_activities(activities, valid_names=None, processed_keys=None
             # Suffer Load calculation for the aggregate
             vam = total_vert / total_hours
             steepness = total_vert / max(total_dist, 0.01)
-            
+
             volume_pts = (total_vert / 100.0) + (total_dist * 2.0)
             rate_pts = (vam / 100.0) + (steepness / 25.0)
-            
+
             intensity_score = volume_pts + rate_pts
             data["intensity_score"] = round(intensity_score, 2)
         else:
             data["intensity_score"] = 0
-        
+
         data["total_dist_mi"] = round(data["total_dist_mi"], 2)
 
     print("\nProcessed activities matching registered athletes (aggregated by runner):")
@@ -406,7 +433,14 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
 
         # Process updates for each athlete found in our aggregated data
         for athlete_name, data in aggregated_data.items():
-            first, last = athlete_name.split(" ")
+            parts = athlete_name.split()
+            if len(parts) >= 2:
+                first = parts[0]
+                last = parts[-1]
+            else:
+                first = athlete_name
+                last = ""
+
             target_row_index = None
 
             # Find which row this athlete matches
@@ -416,7 +450,10 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
                     sheet_last = last_names[i].strip()
                     if (
                         sheet_first.lower() == first.lower()
-                        and sheet_last[0].lower() == last[0].lower()
+                        and (
+                            (not sheet_last and not last) # both empty
+                            or (sheet_last and last and sheet_last[0].lower() == last[0].lower()) # both have initials matching
+                        )
                     ):
                         target_row_index = i + 1  # gspread is 1-indexed
                         break
@@ -449,10 +486,8 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
 
             # Write updated cell value back to Google Sheets!
             worksheet.update_cell(target_row_index, publish_col_index, updated_vert)
-            
-            print(
-                f"--> Updated {athlete_name}: Vert +{new_vert} (={updated_vert})"
-            )
+
+            print(f"--> Updated {athlete_name}: Vert +{new_vert} (={updated_vert})")
         return True
     except Exception as e:
         print(f"Failed to publish to Google Sheets: {e}")
