@@ -448,12 +448,13 @@ def publish_to_google_sheet(aggregated_data, publish_date: str):
                 if i < len(last_names):  # Verify last_names list goes this deep
                     sheet_first = first_names[i].strip()
                     sheet_last = last_names[i].strip()
-                    if (
-                        sheet_first.lower() == first.lower()
-                        and (
-                            (not sheet_last and not last) # both empty
-                            or (sheet_last and last and sheet_last[0].lower() == last[0].lower()) # both have initials matching
-                        )
+                    if sheet_first.lower() == first.lower() and (
+                        (not sheet_last and not last)  # both empty
+                        or (
+                            sheet_last
+                            and last
+                            and sheet_last[0].lower() == last[0].lower()
+                        )  # both have initials matching
                     ):
                         target_row_index = i + 1  # gspread is 1-indexed
                         break
@@ -524,6 +525,19 @@ def run_sync(publish_date="today"):
         print(f"\nFetching recent activities for club {WT_CLUB_ID}...")
         activities = get_club_activities(WT_CLUB_ID, access_token)
         print(f"Retrieved {len(activities)} activities from the club feed!")
+
+        if not activities:
+            # Diagnostic check: verify if the token has activity access
+            try:
+                me_acts_r = requests.get("https://www.strava.com/api/v3/athlete/activities?per_page=1", headers={"Authorization": f"Bearer {access_token}"})
+                if me_acts_r.status_code == 401 or "activity:read_permission" in me_acts_r.text:
+                    print("\n[!] WARNING: Your Strava token lacks 'activity:read' permissions.")
+                    print("    You must re-authorize to see even 'Everyone' activities in the club.")
+                else:
+                    print("\n[!] NOTE: Feed is empty. This usually means activities are set to 'Followers' or 'Only You'.")
+                    print("    Strava's API only returns 'Everyone' (Public) activities in club feeds.")
+            except:
+                pass
 
         if activities:
             aggregated_data = print_processed_activities(

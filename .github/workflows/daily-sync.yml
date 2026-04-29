@@ -1,8 +1,8 @@
 name: Daily Everest Challenge Sync
 
 on:
-  schedule:
-    - cron: '0 3 * * *' # 11:00 PM ET (3:00 AM UTC - Daylight Savings)
+#  schedule:
+#    - cron: '0 3 * * *' # 11:00 PM ET (3:00 AM UTC - Daylight Savings)
   workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
 
 jobs:
